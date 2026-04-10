@@ -1,9 +1,9 @@
-# Ansible 組態管理與自動部署模組 (Configuration & Deployment)
+ # Ansible 組態管理與自動部署模組 (Configuration & Deployment)
 
 ## 模組簡介
 本模組負責接手已完成開通之運算資源（由 Terraform 提供），並進行伺服器內部的環境初始化、依賴軟體安裝以及應用程式邏輯的部署。Ansible 提供了一致性且可重複執行的組態管理 (Configuration Management) 機制，確保不同環境間的設置達到統一。
 
-## 部署腳本說明 (`gcp_setup.yml`)
+## 部署腳本說明 (`local_setup.yml`)
 本腳本針對目標環境 (Ubuntu) 執行系統準備與應用發布，其設計相容於任何提供 SSH 接取的標準 Linux 伺服器實體或容器。
 
 主要的 Playbook 執行階段包含：
@@ -19,7 +19,7 @@
 
 ```mermaid
 graph TD
-    A["Ansible Playbook<br>(gcp_setup.yml)"] -->|"1. 透過 SSH 接取 (Port: 2222)"| B["目標作業環境<br>Ubuntu 22.04"]
+    A["Ansible Playbook<br>(local_setup.yml)"] -->|"1. 透過 SSH 接取 (Port: 2222)"| B["目標作業環境<br>Ubuntu 22.04"]
     
     subgraph Tasks [自動化任務串列]
     B --> C["階段一：更新系統套件清單"]
