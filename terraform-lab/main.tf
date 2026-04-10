@@ -9,7 +9,7 @@ terraform {
 
 provider "docker" {}
 
-# 1. 使用官方 Ubuntu 22.04 (絕對不會拉不到)
+# 1. 使用官方 Ubuntu 22.04 
 resource "docker_image" "ubuntu_official" {
   name = "ubuntu:22.04"
 }
@@ -18,7 +18,7 @@ resource "docker_image" "ubuntu_official" {
 resource "docker_container" "my_local_vm" {
   name  = "ansible-target-1"
   image = docker_image.ubuntu_official.image_id
-  
+
   # 讓容器保持運行並執行安裝 SSH 的指令
   entrypoint = ["/bin/bash", "-c", "apt-get update && apt-get install -y openssh-server && mkdir /var/run/sshd && echo 'root:root' | chpasswd && sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && /usr/sbin/sshd -D"]
 
