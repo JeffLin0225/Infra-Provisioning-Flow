@@ -1,1 +1,30 @@
 /.DS_Store
+
+# -----------------
+# Jenkins Lab
+# -----------------
+# 忽略 Jenkins 主程式與產生的所有資料檔 (零污染架構)
+jenkins-lab/jenkins.war
+jenkins-lab/jenkins_data/
+
+# -----------------
+# Terraform Lab
+# -----------------
+# 忽略環境備份檔與開發舊檔
+
+
+# 本機模組與快取
+**/.terraform/
+**/.terraform.lock.hcl
+
+# 狀態檔 (State files)
+*.tfstate
+*.tfstate.backup
+
+# 產生出來的執行計畫紀錄 (如果有用到)
+*.tfplan
+
+# -----------------
+# Ansible Lab
+# -----------------
+*.retry

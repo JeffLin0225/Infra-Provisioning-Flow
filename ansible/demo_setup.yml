@@ -1,0 +1,42 @@
+---
+- name: 自動化部署 Nginx 與 Java (僅針對 web_servers 群組)
+  hosts: web_servers
+  become: yes  # 關鍵！這代表會使用 sudo 權限執行安裝
+
+  tasks:
+    - name: 更新 apt 套件清單
+      apt:
+        update_cache: yes
+
+    - name: 安裝 Nginx
+      apt:
+        name: nginx
+        state: present
+
+    - name: 啟動並設定 Nginx 開機執行
+      service:
+        name: nginx
+        state: started
+        enabled: yes
+
+    - name: 安裝 Java (使用預設 JDK)
+      apt:
+        name: default-jdk
+        state: present
+
+    - name: 檢查 Java 版本
+      command: java -version
+      register: java_version_result
+      changed_when: false
+
+    - name: 顯示 Java 安裝結果
+      debug:
+        msg: "Java 安裝成功！版本資訊：{{ java_version_result.stderr_lines[0] }}"
+
+    - name: 部署自定義網頁內容
+      copy:
+        src: ./index.html          # 檔案路徑
+        dest: /var/www/html/index.html  # VM 上 Nginx 預設網頁路徑
+        owner: www-data            # 確保 Nginx 有權限讀取
+        group: www-data
+        mode: '0644'               # 設定權限為可讀取

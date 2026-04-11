@@ -1,4 +1,4 @@
-### 練習建立三個 ubuntu 容器 ### 
+### (備份ing) ### 練習建立一個 ubuntu 容器 
 
 terraform {
   required_providers {
@@ -11,29 +11,14 @@ terraform {
 
 provider "docker" {}
 
-# 加入變數宣告，讓 Jenkins 或外部指令可以動態代入
-variable "container_count" {
-  description = "建立容器的數量 (Jenkins 點選的數量)"
-  type        = number
-  default     = 3     # 如果外部沒傳入，預設是 3 台
-}
-
-variable "start_port" {
-  description = "SSH 對外映射的起始 Port"
-  type        = number
-  default     = 2222  # 如果外部沒傳入，預設從 2222 開始
-}
-
 # 1. 使用官方 Ubuntu 22.04 
 resource "docker_image" "ubuntu_official" {
   name = "ubuntu:22.04"
 }
 
 # 2. 啟動容器並「手動」開啟 SSH 門口
-resource "docker_container" "my_local_vms" {
-  count = var.container_count
-
-  name  = "ansible-target-${count.index + 1}"
+resource "docker_container" "my_local_vm" {
+  name  = "ansible-target-1"
   image = docker_image.ubuntu_official.image_id
 
   # 讓容器保持運行並執行安裝 SSH 的指令
@@ -41,7 +26,6 @@ resource "docker_container" "my_local_vms" {
 
   ports {
     internal = 22
-    # 對外 Port 會從設定的 start_port 開始往上加
-    external = var.start_port + count.index
+    external = 2222
   }
 }

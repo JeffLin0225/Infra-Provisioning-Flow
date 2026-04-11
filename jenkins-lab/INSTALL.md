@@ -1,50 +1,42 @@
-# Jenkins 安裝教學 (基於 Orbstack Container)
+# Jenkins 獨立環境 (Standalone) 啟動教學
 
-本教學將引導您如何在 macOS 上透過 **Orbstack** (作為 Docker 引擎的輕量化替代方案) 快速安裝並啟動 Jenkins 服務。
+為了確保開發環境能實現高效的**資源集中管理**，並避免與本機上的其他系統配置產生耦合與干擾，本專案不採用全域安裝方式 (如 Homebrew 等工具)。
 
-## 1. 環境準備
+我們將直接採用 Jenkins 最純粹的 Java 核心檔 (`jenkins.war`)，並透過指定專屬資料夾的方式，實作檔案等級的完全隔離。此作法也讓 Jenkins 能自然地存取本機的 Docker 引擎與 Terraform 工具，大幅簡化架構的複雜度。
 
-1. **安裝 Orbstack**: 
-   如果您尚未安裝 Orbstack，可以前往 [Orbstack 官方網站](https://orbstack.dev/) 下載並安裝。它是一個輕量、快速的 macOS Docker Desktop 替代品。
-2. 啟動 Orbstack，確保您可以在終端機中正常執行 `docker` 指令。
-   ```bash
-   docker --version
-   ```
+## 1. 環境前置作業
 
-## 2. 取得映像檔並建立 Jenkins 容器
-
-我們會使用官方的 Jenkins LTS (長期支援) 映像檔。為了能夠清楚看到下載進度，我們先將它拉取到本地，再啟動服務。請在終端機中依序執行：
-
-**第一步：拉取映像檔**
+您需要確保本機已安裝 **Java (建議 Java 17 或 Java 21 LTS)**。
+您可以開啟終端機確認版本：
 ```bash
-docker pull jenkins/jenkins:lts
+java -version
 ```
 
-**第二步：啟動容器**
-```bash
-docker run -d --name jenkins-server --restart=on-failure -p 8080:8080 -p 50000:50000 -v jenkins_home:/var/jenkins_home jenkins/jenkins:lts
-```
+## 2. 下載 Jenkins 核心程式
 
-**指令說明：**
-- `-d`: 在背景執行容器 (Detached mode)。
-- `--name jenkins-server`: 將容器命名為 `jenkins-server`，方便後續管理。
-- `--restart=on-failure`: 如果容器意外退出，則自動重新啟動。
-- `-p 8080:8080`: 將本機的 8080 port 對應到容器內的 8080 port (Jenkins 網頁介面預設 port)。
-- `-p 50000:50000`: 對應 50000 port，這是 Jenkins master 與 worker 節點之間通訊用的 port (JnlpPort)。
-- `-v jenkins_home:/var/jenkins_home`: 建立一份 Docker Volume 命名為 `jenkins_home`，用於持久化儲存 Jenkins 的設定、管線腳本與安裝的套件。這樣即使容器被刪除，資料也不會遺失。
-- `jenkins/jenkins:lts`: 使用官方 jenkins 映像檔的 lts (Long Term Support) 穩定版本。
-
-## 3. 取得初始管理員密碼
-
-Jenkins 首次啟動時，會產生一組隨機的管理員密碼。我們需要這組密碼才能完成初始化的網頁設定。
-
-您可以透過查看容器日誌來取得密碼：
+請使用終端機進入專案的 `jenkins-lab` 目錄，然後透過以下指令直接向官方伺服器下載最新的 LTS (長期支援) 穩定版核心檔。載完後，目錄下會多出一個大約 90MB 的 `jenkins.war`。
 
 ```bash
-docker logs jenkins-server
+cd YOUR_PROJECT_ROOT/jenkins-lab
+curl -sLO https://get.jenkins.io/war-stable/latest/jenkins.war
+```
+*(請將上述路徑換成您實際專案的目錄位置)*
+
+## 3. 指定專屬工作區並啟動服務 (集中化管理)
+
+請在 `jenkins-lab` 目錄中執行以下指令來啟動：
+
+```bash
+JENKINS_HOME=./jenkins_data java -jar jenkins.war
 ```
 
-在日誌輸出中，找到類似下面這段文字，下方的一長串字串即為密碼：
+**架構優勢解說：**
+- `JENKINS_HOME=./jenkins_data`：透過宣告此環境變數，我們強制將當前目錄的 `jenkins_data` 設為 Jenkins 的根目錄。這代表所有的外掛套件、日誌檔及專案工作區都會集中收納於此。未來若是需要遷移或是一次性移除服務，只需搬移或刪除該資料夾即可，不會在您的系統根目錄留下任何無關的紀錄。
+
+## 4. 取得初始密碼
+
+上述啟動指令執行後，因 Jenkins 為伺服器類型服務，您的終端機視窗將會持續輸出系統日誌。**請保留該視窗運行**。
+在日誌輸出中，尋找被星號包圍的區塊，即可取得第一次登入所需的驗證碼：
 
 ```text
 *************************************************************
@@ -56,36 +48,16 @@ Please use the following password to proceed to installation:
 
 abcd1234efgh5678ijkl9012mnop3456
 
-This may also be found at: /var/jenkins_home/secrets/initialAdminPassword
-
+This may also be found at: /path/to/your/project/jenkins-lab/jenkins_data/secrets/initialAdminPassword
 *************************************************************
 *************************************************************
 *************************************************************
 ```
 
-*備註：您也可以使用 `docker exec -it jenkins-server cat /var/jenkins_home/secrets/initialAdminPassword` 直接印出密碼。*
+## 5. 完成網頁端初始化
 
-## 4. 完成 Jenkins 初始化設定
-
-1. 打開瀏覽器，前往 [http://localhost:8080](http://localhost:8080)。
-2. 畫面會提示您 **"Unlock Jenkins"**，請將步驟 3 取得的密碼貼上並點擊 **Continue**。
-3. 接下來會進入插件安裝畫面，建議選擇 **"Install suggested plugins"** (安裝建議的套件)，這會自動為您安裝 Git, Pipeline 等常用的基礎套件。
-4. 套件安裝完成後，系統會提示您建立第一位管理員 (First Admin User)。依序填入您的帳號、密碼、全名與電子郵件。
-5. 最後確認 Jenkins URL (通常維持 `http://localhost:8080/` 即可)，點擊 **Save and Finish**。
-
-看到 **"Jenkins is ready!"** 畫面後，點擊 **Start using Jenkins** 即可進入主控台。
-
-## 5. 日常管理指令
-
-- **停止 Jenkins 服務:**
-  ```bash
-  docker stop jenkins-server
-  ```
-- **啟動 Jenkins 服務:**
-  ```bash
-  docker start jenkins-server
-  ```
-- **查看運作狀態:**
-  ```bash
-  docker ps -a | grep jenkins-server
-  ```
+1. 打開瀏覽器，前往 **[http://localhost:8080](http://localhost:8080)**。
+2. 貼上剛剛於 Terminal 取得的密碼。
+3. 推薦點選 **Install suggested plugins (安裝建議的外掛程式)**，系統會自動處理基礎環境。
+4. 建立一組您的管理員專屬帳號與密碼。
+5. 設定完成後即可進入 Jenkins 主控台，接續後續管線之建立與測試操作！
