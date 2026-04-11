@@ -3,6 +3,7 @@ pipeline {
 
     // 定義 Jenkins 在啟動任务時，跳出對話框讓您填寫的參數
     parameters {
+        choice(name: 'ACTION', choices: ['apply', 'destroy'], description: '請選擇要「建立 (apply)」還是「銷毀 (destroy)」機器？')
         string(name: 'VM_COUNT', defaultValue: '3', description: '想要建立幾台目標 VM (容器)？')
         string(name: 'START_PORT', defaultValue: '2222', description: 'SSH 預設起始 Port 號？')
     }
@@ -27,16 +28,22 @@ pipeline {
             }
         }
 
-        stage('Terraform Apply (開機器)') {
+        stage('Terraform Execute (建置與銷毀)') {
             steps {
                 dir('terraform-lab') {
-                    // 使用 sh 執行指令，並帶入 -auto-approve 省略 yes 輸入
-                    // 並將上方定義的 Parameters 塞到 -var 裡面！
-                    sh """
-                    terraform apply -auto-approve \
-                        -var="container_count=${params.VM_COUNT}" \
-                        -var="start_port=${params.START_PORT}"
-                    """
+                    script {
+                        if (params.ACTION == 'apply') {
+                            // 使用 sh 執行建置，並帶入 -auto-approve 省略 yes 輸入
+                            sh """
+                            terraform apply -auto-approve \
+                                -var="container_count=${params.VM_COUNT}" \
+                                -var="start_port=${params.START_PORT}"
+                            """
+                        } else if (params.ACTION == 'destroy') {
+                            // 使用 sh 執行銷毀 (因為 Terraform destroy 會直接依據 state 檔全部清空，所以不需要再傳參數進去)
+                            sh "terraform destroy -auto-approve"
+                        }
+                    }
                 }
             }
         }
