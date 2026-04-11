@@ -1,42 +1,53 @@
 ---
-- name: 自動化部署 Nginx 與 Java (僅針對 web_servers 群組)
-  hosts: web_servers
-  become: yes  # 關鍵！這代表會使用 sudo 權限執行安裝
+- name: 極速極輕量 Python 微服務部署
+  #  Jenkins 下達 --limit 給予動態目標 (例如 web_servers)
+  hosts: all
+  become: yes  # 使用 root 權限
 
   tasks:
-    - name: 更新 apt 套件清單
+    - name: 確保基礎環境存在 (Python3 與解壓縮軟體)
       apt:
+        name: 
+          - python3
+          - unzip
+        state: present
         update_cache: yes
 
-    - name: 安裝 Nginx
-      apt:
-        name: nginx
-        state: present
+    - name: 建立應用程式存放資料夾
+      file:
+        path: /opt/auto-infra-app
+        state: directory
+        mode: '0755'
 
-    - name: 啟動並設定 Nginx 開機執行
-      service:
-        name: nginx
-        state: started
-        enabled: yes
+    - name: 部署並解壓縮 Build 出來的 Artifact
+      # unarchive 模組會自動將控制台 (Jenkins 端) 的 zip 解壓縮送到遠端 VM
+      unarchive:
+        src: ../app-src/app.zip
+        dest: /opt/auto-infra-app/
+        remote_src: no
 
-    - name: 安裝 Java (使用預設 JDK)
-      apt:
-        name: default-jdk
-        state: present
-
-    - name: 檢查 Java 版本
-      command: java -version
-      register: java_version_result
-      changed_when: false
-
-    - name: 顯示 Java 安裝結果
-      debug:
-        msg: "Java 安裝成功！版本資訊：{{ java_version_result.stderr_lines[0] }}"
-
-    - name: 部署自定義網頁內容
+    - name: 建立專屬背景服務 (Systemd Daemon)
       copy:
-        src: ./index.html          # 檔案路徑
-        dest: /var/www/html/index.html  # VM 上 Nginx 預設網頁路徑
-        owner: www-data            # 確保 Nginx 有權限讀取
-        group: www-data
-        mode: '0644'               # 設定權限為可讀取
+        dest: /etc/systemd/system/auto-infra-app.service
+        content: |
+          [Unit]
+          Description=Auto Infra Lightweight Web Service
+          After=network.target
+
+          [Service]
+          Type=simple
+          User=root
+          WorkingDirectory=/opt/auto-infra-app
+          ExecStart=/usr/bin/python3 app.py
+          Restart=always
+          RestartSec=3
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: 重新載入 Systemd 並啟動服務
+      systemd:
+        daemon_reload: yes
+        name: auto-infra-app
+        enabled: yes
+        state: restarted

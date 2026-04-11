@@ -45,3 +45,31 @@ resource "docker_container" "my_local_vms" {
     external = var.start_port + count.index
   }
 }
+
+# 3. 動態產生 Ansible Inventory 檔案
+resource "local_file" "ansible_inventory" {
+  # 放在上層的 ansible 資料夾內
+  filename = "../ansible/dynamic_hosts.ini"
+  
+  # 使用 Terraform template 語法，依據 VM 數量自動分群組
+  content = <<-EOT
+[web_servers]
+%{ for i in range(var.container_count) ~}
+%{ if i < 2 ~}
+localhost:${var.start_port + i}
+%{ endif ~}
+%{ endfor ~}
+
+[others]
+%{ for i in range(var.container_count) ~}
+%{ if i >= 2 ~}
+localhost:${var.start_port + i}
+%{ endif ~}
+%{ endfor ~}
+
+[all:vars]
+ansible_user=root
+ansible_ssh_pass=root
+ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+EOT
+}
