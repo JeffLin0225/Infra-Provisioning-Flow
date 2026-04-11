@@ -25,7 +25,11 @@
         remote_src: no
 
     - name: 停止舊的 Python 服務 (如果有在跑)
-      shell: "pkill -f 'python3 app.py' || true"
+      shell: |
+        if [ -f /opt/auto-infra-app/app.pid ]; then
+          kill $(cat /opt/auto-infra-app/app.pid) 2>/dev/null || true
+          rm -f /opt/auto-infra-app/app.pid
+        fi
 
     - name: 在背景啟動 Python 服務
       shell: |
