@@ -12,14 +12,16 @@ pipeline {
     stages {
         stage('Checkout Code') {
             steps {
-                echo '由於是本機實驗，跳過 Git 拉取動作，將直接進入本機開發目錄...'
+                // 因為我們設定了 SCM，Jenkins 會幫我們自動自動取得原始碼進入它的暫存工作區！
+                // 以下所有操作都可以直接使用 repo 的相對路徑。
+                echo '程式碼已從 Git/SCM 取得完成！'
             }
         }
 
         stage('Terraform Init') {
             steps {
-                // 使用 dir 強制指定工作目錄為您本機目前的開發目錄
-                dir('/Users/jefflin/Desktop/auto-infra-build/terraform-lab') {
+                // 現在有了 SCM 工作區，只要用相對路徑切換進去即可：
+                dir('terraform-lab') {
                     sh 'terraform init'
                 }
             }
@@ -27,7 +29,7 @@ pipeline {
 
         stage('Terraform Apply (開機器)') {
             steps {
-                dir('/Users/jefflin/Desktop/auto-infra-build/terraform-lab') {
+                dir('terraform-lab') {
                     // 使用 sh 執行指令，並帶入 -auto-approve 省略 yes 輸入
                     // 並將上方定義的 Parameters 塞到 -var 裡面！
                     sh """
