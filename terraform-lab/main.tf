@@ -44,6 +44,22 @@ resource "docker_container" "my_local_vms" {
     # 對外 Port 會從設定的 start_port 開始往上加
     external = var.start_port + count.index
   }
+
+  # 探針驗收機制：強制 Terraform 留在原地輪詢 OS 內部，直到確認 SSH 啟動完成
+  provisioner "local-exec" {
+    command = <<-EOT
+      echo '開始驗收 VM ${count.index + 1} 的 SSH 服務...'
+      for i in {1..45}; do
+        if nc -z localhost ${var.start_port + count.index}; then
+          echo '驗收成功！SSH 已經開放。'
+          exit 0
+        fi
+        sleep 2
+      done
+      echo '等候 90 秒超時，SSH 開機失敗！'
+      exit 1
+    EOT
+  }
 }
 
 # 3. 動態產生 Ansible Inventory 檔案
