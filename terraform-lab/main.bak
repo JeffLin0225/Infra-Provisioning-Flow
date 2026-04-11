@@ -1,0 +1,31 @@
+### (備份ing) ### 練習建立一個 ubuntu 容器 
+
+terraform {
+  required_providers {
+    docker = {
+      source  = "kreuzwerker/docker"
+      version = "~> 3.0.1"
+    }
+  }
+}
+
+provider "docker" {}
+
+# 1. 使用官方 Ubuntu 22.04 
+resource "docker_image" "ubuntu_official" {
+  name = "ubuntu:22.04"
+}
+
+# 2. 啟動容器並「手動」開啟 SSH 門口
+resource "docker_container" "my_local_vm" {
+  name  = "ansible-target-1"
+  image = docker_image.ubuntu_official.image_id
+
+  # 讓容器保持運行並執行安裝 SSH 的指令
+  entrypoint = ["/bin/bash", "-c", "apt-get update && apt-get install -y openssh-server && mkdir /var/run/sshd && echo 'root:root' | chpasswd && sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && /usr/sbin/sshd -D"]
+
+  ports {
+    internal = 22
+    external = 2222
+  }
+}

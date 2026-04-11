@@ -1,0 +1,50 @@
+---
+- name: 極速極輕量 Python 微服務部署
+  hosts: all
+  become: yes
+
+  tasks:
+    - name: 確保基礎環境存在 (Python3 與解壓縮軟體)
+      apt:
+        name: 
+          - python3
+          - unzip
+        state: present
+        update_cache: yes
+
+    - name: 建立應用程式存放資料夾
+      file:
+        path: /opt/auto-infra-app
+        state: directory
+        mode: '0755'
+
+    - name: 部署並解壓縮 Build 出來的 Artifact
+      unarchive:
+        src: "{{ playbook_dir }}/../app-src/app.zip"
+        dest: /opt/auto-infra-app/
+        remote_src: no
+
+    - name: 停止舊的 Python 服務 (如果有在跑)
+      shell: |
+        if [ -f /opt/auto-infra-app/app.pid ]; then
+          kill $(cat /opt/auto-infra-app/app.pid) 2>/dev/null || true
+          rm -f /opt/auto-infra-app/app.pid
+        fi
+
+    - name: 在背景啟動 Python 服務
+      shell: |
+        nohup python3 /opt/auto-infra-app/app.py > /opt/auto-infra-app/app.log 2>&1 &
+        sleep 1
+        echo "啟動成功! PID = $(pgrep -f 'python3 /opt/auto-infra-app/app.py')"
+
+    - name: 驗收服務成功啟動 (等待 Port 8080 回應)
+      shell: |
+        for i in $(seq 1 15); do
+          if python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080')" 2>/dev/null; then
+            echo '驗收通過！Python Web 服務已在 Port 8080 成功回應！'
+            exit 0
+          fi
+          sleep 1
+        done
+        echo '驗收失敗：15 秒內 Port 8080 無回應'
+        exit 1

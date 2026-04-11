@@ -1,0 +1,84 @@
+pipeline {
+    agent any
+
+    parameters {
+        choice(name: 'ACTION', choices: ['apply', 'destroy'], description: '請選擇要「建立 (apply)」還是「銷毀 (destroy)」機器？')
+        string(name: 'VM_COUNT', defaultValue: '3', description: '想要建立幾台目標 VM (容器)？')
+        string(name: 'START_PORT', defaultValue: '2222', description: 'SSH 預設起始 Port 號？')
+        string(name: 'WEB_PORT_START', defaultValue: '8081', description: 'HTTP Web 服務起始 Port 號？')
+        choice(name: 'DEPLOY_TARGET', choices: ['web_servers', 'all', 'others', 'none'], description: 'Ansible 該部署到哪些目標？ (none = 單純開機，略過部署)')
+    }
+
+    stages {
+        stage('Checkout Code') {
+            steps {
+                echo '程式碼已從 Git/SCM 取得完成！'
+            }
+        }
+
+        stage('Terraform Init') {
+            steps {
+                dir('terraform-lab') {
+                    sh 'terraform init'
+                }
+            }
+        }
+
+        stage('Terraform Execute') {
+            steps {
+                dir('terraform-lab') {
+                    script {
+                        if (params.ACTION == 'apply') {
+                            sh """
+                            terraform apply -auto-approve \
+                                -var="container_count=${params.VM_COUNT}" \
+                                -var="start_port=${params.START_PORT}" \
+                                -var="web_port_start=${params.WEB_PORT_START}"
+                            """
+                        } else if (params.ACTION == 'destroy') {
+                            sh "terraform destroy -auto-approve"
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Build Application') {
+            when {
+                expression { params.ACTION == 'apply' && params.DEPLOY_TARGET != 'none' }
+            }
+            steps {
+                dir('app-src') {
+                    echo "開始進行應用程式打包測試..."
+                    sh './build.sh'
+                }
+            }
+        }
+
+        stage('Ansible Deploy') {
+            when {
+                expression { params.ACTION == 'apply' && params.DEPLOY_TARGET != 'none' }
+            }
+            steps {
+                dir('ansible') {
+                    echo "準備呼叫 Conda 環境與 Ansible 進行發布..."
+                    
+                    sh """
+                    #!/bin/bash
+                    
+                    # 1. 啟動 conda 環境
+                    eval "\$(conda shell.bash hook)"
+                    conda activate codedev
+                    
+                    # 2. 顯示環境資訊
+                    which python
+                    ansible --version
+                    
+                    # 3. 執行 Ansible 部署
+                    ansible-playbook -i dynamic_hosts.ini demo_setup.yml --limit "${params.DEPLOY_TARGET}"
+                    """
+                }
+            }
+        }
+    }
+}
