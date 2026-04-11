@@ -1,45 +1,41 @@
 pipeline {
     agent any
 
-    // 定義 Jenkins 在啟動任务時，跳出對話框讓您填寫的參數
     parameters {
         choice(name: 'ACTION', choices: ['apply', 'destroy'], description: '請選擇要「建立 (apply)」還是「銷毀 (destroy)」機器？')
         string(name: 'VM_COUNT', defaultValue: '3', description: '想要建立幾台目標 VM (容器)？')
         string(name: 'START_PORT', defaultValue: '2222', description: 'SSH 預設起始 Port 號？')
-        choice(name: 'DEPLOY_TARGET', choices: ['web_servers', 'all', 'others', 'none'], description: 'Terraform 開機完成後，Ansible 該部署到哪些目標？ (none = 單純開機，略過部署)')
+        string(name: 'WEB_PORT_START', defaultValue: '8081', description: 'HTTP Web 服務起始 Port 號？')
+        choice(name: 'DEPLOY_TARGET', choices: ['web_servers', 'all', 'others', 'none'], description: 'Ansible 該部署到哪些目標？ (none = 單純開機，略過部署)')
     }
 
     stages {
         stage('Checkout Code') {
             steps {
-                // 因為我們設定了 SCM，Jenkins 會幫我們自動自動取得原始碼進入它的暫存工作區！
-                // 以下所有操作都可以直接使用 repo 的相對路徑。
                 echo '程式碼已從 Git/SCM 取得完成！'
             }
         }
 
         stage('Terraform Init') {
             steps {
-                // 現在有了 SCM 工作區，只要用相對路徑切換進去即可：
                 dir('terraform-lab') {
                     sh 'terraform init'
                 }
             }
         }
 
-        stage('Terraform Execute (建置與銷毀)') {
+        stage('Terraform Execute') {
             steps {
                 dir('terraform-lab') {
                     script {
                         if (params.ACTION == 'apply') {
-                            // 此步驟會讓 Terraform 同時生成基礎設施，與最新的 ansible/dynamic_hosts.ini 清單！
                             sh """
                             terraform apply -auto-approve \
                                 -var="container_count=${params.VM_COUNT}" \
-                                -var="start_port=${params.START_PORT}"
+                                -var="start_port=${params.START_PORT}" \
+                                -var="web_port_start=${params.WEB_PORT_START}"
                             """
                         } else if (params.ACTION == 'destroy') {
-                            // 使用 sh 執行銷毀 (因為 Terraform destroy 會直接依據 state 檔全部清空，所以不需要再傳參數進去)
                             sh "terraform destroy -auto-approve"
                         }
                     }
@@ -47,9 +43,8 @@ pipeline {
             }
         }
 
-        stage('Build Application (打包應用程式)') {
+        stage('Build Application') {
             when {
-                // 防呆機制：如果是殺機器，或是選擇 none，就不需要浪費時間編譯了！
                 expression { params.ACTION == 'apply' && params.DEPLOY_TARGET != 'none' }
             }
             steps {
@@ -60,7 +55,7 @@ pipeline {
             }
         }
 
-        stage('Ansible Deploy (動態派送與上線)') {
+        stage('Ansible Deploy') {
             when {
                 expression { params.ACTION == 'apply' && params.DEPLOY_TARGET != 'none' }
             }
@@ -68,22 +63,19 @@ pipeline {
                 dir('ansible') {
                     echo "準備呼叫 Conda 環境與 Ansible 進行發布..."
                     
-                    // Jenkins 的 sh 預設為乾淨的子程序，我們手動加載 Conda 並自動代入變數
                     sh """
                     #!/bin/bash
                     
-                    # 1. 取得與登入您的 conda 專屬開發環境
+                    # 1. 啟動 conda 環境
                     eval "\$(conda shell.bash hook)"
                     conda activate codedev
                     
-                    # 2. 顯示目前的 Python 環境以確保沒錯
+                    # 2. 顯示環境資訊
                     which python
                     ansible --version
                     
-                    # 3. 終極兵器發射！
-                    #    -i dynamic_hosts.ini : 指定 Terraform 剛剛新鮮吐出來的動態名單
-                    #    --limit \$DEPLOY_TARGET : 指定您在網頁下拉選單選擇的目標交集
-                    ansible-playbook -i dynamic_hosts.ini demo_setup.yml --limit "\$DEPLOY_TARGET"
+                    # 3. 執行 Ansible 部署
+                    ansible-playbook -i dynamic_hosts.ini demo_setup.yml --limit "${params.DEPLOY_TARGET}"
                     """
                 }
             }

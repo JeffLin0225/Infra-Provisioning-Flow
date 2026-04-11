@@ -1,4 +1,4 @@
-/.DS_Store
+.DS_Store
 
 # -----------------
 # Jenkins Lab
@@ -10,21 +10,29 @@ jenkins-lab/jenkins_data/
 # -----------------
 # Terraform Lab
 # -----------------
-# 忽略環境備份檔與開發舊檔
-
-
 # 本機模組與快取
 **/.terraform/
 **/.terraform.lock.hcl
 
-# 狀態檔 (State files)
+# 狀態檔 (State files) — 絕對禁止上傳 Git
 *.tfstate
 *.tfstate.backup
 
-# 產生出來的執行計畫紀錄 (如果有用到)
+# 產生出來的執行計畫紀錄
 *.tfplan
+
+# Jenkins 在專案根目錄產出的臨時工作區
+*@tmp/
 
 # -----------------
 # Ansible Lab
 # -----------------
 *.retry
+# Terraform 動態產出的 Inventory（每次跑管線都會重新產生）
+ansible/dynamic_hosts.ini
+
+# -----------------
+# Build Artifacts
+# -----------------
+# 建置過程中產出的打包檔
+app-src/app.zip

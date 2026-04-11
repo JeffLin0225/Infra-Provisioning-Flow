@@ -1,8 +1,7 @@
 ---
 - name: 極速極輕量 Python 微服務部署
-  #  Jenkins 下達 --limit 給予動態目標 (例如 web_servers)
   hosts: all
-  become: yes  # 使用 root 權限
+  become: yes
 
   tasks:
     - name: 確保基礎環境存在 (Python3 與解壓縮軟體)
@@ -20,24 +19,28 @@
         mode: '0755'
 
     - name: 部署並解壓縮 Build 出來的 Artifact
-      # unarchive 模組自動將控制台 (Jenkins 端) 的 zip 解壓縮送到遠端 VM
       unarchive:
         src: "{{ playbook_dir }}/../app-src/app.zip"
         dest: /opt/auto-infra-app/
         remote_src: no
 
-    - name: 將舊的 Python 服務絮死 (如果有在距)
+    - name: 停止舊的 Python 服務 (如果有在跑)
       shell: "pkill -f 'python3 app.py' || true"
 
-    - name: 在背景啟動 Python 服務 (nohup 容器標準模式)
+    - name: 在背景啟動 Python 服務
       shell: |
         nohup python3 /opt/auto-infra-app/app.py > /opt/auto-infra-app/app.log 2>&1 &
-        echo $! > /opt/auto-infra-app/app.pid
-        echo "啟動成功! PID = $(cat /opt/auto-infra-app/app.pid)"
+        sleep 1
+        echo "啟動成功! PID = $(pgrep -f 'python3 /opt/auto-infra-app/app.py')"
 
-    - name: 確認服務成功啟動 (Port 8080 有在監聽)
-      wait_for:
-        port: 8080
-        timeout: 15
-        host: 127.0.0.1
-        state: started
+    - name: 驗收服務成功啟動 (等待 Port 8080 回應)
+      shell: |
+        for i in $(seq 1 15); do
+          if python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080')" 2>/dev/null; then
+            echo '驗收通過！Python Web 服務已在 Port 8080 成功回應！'
+            exit 0
+          fi
+          sleep 1
+        done
+        echo '驗收失敗：15 秒內 Port 8080 無回應'
+        exit 1
