@@ -20,34 +20,24 @@
         mode: '0755'
 
     - name: 部署並解壓縮 Build 出來的 Artifact
-      # unarchive 模組會自動將控制台 (Jenkins 端) 的 zip 解壓縮送到遠端 VM
+      # unarchive 模組自動將控制台 (Jenkins 端) 的 zip 解壓縮送到遠端 VM
       unarchive:
-        src: ../app-src/app.zip
+        src: "{{ playbook_dir }}/../app-src/app.zip"
         dest: /opt/auto-infra-app/
         remote_src: no
 
-    - name: 建立專屬背景服務 (Systemd Daemon)
-      copy:
-        dest: /etc/systemd/system/auto-infra-app.service
-        content: |
-          [Unit]
-          Description=Auto Infra Lightweight Web Service
-          After=network.target
+    - name: 將舊的 Python 服務絮死 (如果有在距)
+      shell: "pkill -f 'python3 app.py' || true"
 
-          [Service]
-          Type=simple
-          User=root
-          WorkingDirectory=/opt/auto-infra-app
-          ExecStart=/usr/bin/python3 app.py
-          Restart=always
-          RestartSec=3
+    - name: 在背景啟動 Python 服務 (nohup 容器標準模式)
+      shell: |
+        nohup python3 /opt/auto-infra-app/app.py > /opt/auto-infra-app/app.log 2>&1 &
+        echo $! > /opt/auto-infra-app/app.pid
+        echo "啟動成功! PID = $(cat /opt/auto-infra-app/app.pid)"
 
-          [Install]
-          WantedBy=multi-user.target
-
-    - name: 重新載入 Systemd 並啟動服務
-      systemd:
-        daemon_reload: yes
-        name: auto-infra-app
-        enabled: yes
-        state: restarted
+    - name: 確認服務成功啟動 (Port 8080 有在監聽)
+      wait_for:
+        port: 8080
+        timeout: 15
+        host: 127.0.0.1
+        state: started

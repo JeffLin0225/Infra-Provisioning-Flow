@@ -18,6 +18,12 @@ variable "container_count" {
   default     = 3     # 如果外部沒傳入，預設是 3 台
 }
 
+variable "web_port_start" {
+  description = "HTTP Web 服務對外映射的起始 Port"
+  type        = number
+  default     = 8081  # 主機 8081/8082/8083 對映到容器內部 8080
+}
+
 variable "start_port" {
   description = "SSH 對外映射的起始 Port"
   type        = number
@@ -41,8 +47,14 @@ resource "docker_container" "my_local_vms" {
 
   ports {
     internal = 22
-    # 對外 Port 會從設定的 start_port 開始往上加
+    # SSH 對外 Port 會從設定的 start_port 開始往上加
     external = var.start_port + count.index
+  }
+
+  ports {
+    internal = 8080
+    # HTTP Web Port 映射：就對應到主機 8081, 8082, 8083...
+    external = var.web_port_start + count.index
   }
 
   # 探針驗收機制：強制 Terraform 留在原地輪詢 OS 內部，直到確認 SSH 啟動完成
