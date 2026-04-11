@@ -50,7 +50,8 @@ resource "docker_container" "my_local_vms" {
     command = <<-EOT
       echo '開始驗收 VM ${count.index + 1} 的 SSH 服務...'
       for i in {1..45}; do
-        if nc -z localhost ${var.start_port + count.index}; then
+        # 由於 Docker Port 映射的假象，單純測 tcp port 會提早放行。必須測試能不能抓到 SSH 字眼！
+        if nc -w 5 localhost ${var.start_port + count.index} < /dev/null 2>/dev/null | grep -q 'SSH'; then
           echo '驗收成功！SSH 已經開放。'
           exit 0
         fi
