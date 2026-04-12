@@ -1,20 +1,17 @@
 #!/bin/bash
 set -e
 
-echo "==> 開始進行應用程式建置 (Build Application) <=="
+echo "==> 開始進行應用程式建置 (Build) <=="
 
-# 模擬測試階段
-echo "執行輕量級 Python 語法檢查 (Linting)..."
+# 語法檢查：使用 Python 內建的 py_compile 模組驗證語法正確性
+echo "執行 Python 語法檢查..."
 python3 -m py_compile app.py
-echo "==> 語法檢查 ✅ 通過！"
+echo "==> 語法檢查通過 ✅"
 
-# 開始打包階段
-echo "正在將代碼打包為 artifact (app.zip)..."
-# 清除舊的打包檔
+# 打包階段：將應用程式打包為 zip，供 Ansible 傳送到目標容器
+echo "正在將程式碼打包為 app.zip..."
 rm -f app.zip
-
-# 執行打包 (沒有裝 zip 可以用 tar，但 Mac 跟 Ubuntu 基本都有 zip 或 built-in python zip)
 python3 -m zipfile -c app.zip app.py
 
-echo "==> 打包完成！"
+echo "==> 打包完成 ✅"
 ls -lh app.zip

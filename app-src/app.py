@@ -2,11 +2,12 @@ import os
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import socket
 
-# 取得機器的 Hostname 方便辨識這是哪一台 VM
+# 取得容器的 Hostname，用來辨識這是哪一台 VM 在回應
 hostname = socket.gethostname()
 port = 8080
 
 class SimpleHandler(BaseHTTPRequestHandler):
+    """極輕量 HTTP 處理器，收到 GET 請求時回傳一個簡單的 HTML 頁面"""
     def do_GET(self):
         self.send_response(200)
         self.send_header('Content-type', 'text/html; charset=utf-8')
@@ -22,10 +23,10 @@ class SimpleHandler(BaseHTTPRequestHandler):
                 </style>
             </head>
             <body>
-                <h1>🚀 恭喜！CI/CD 自動化極速發布大成功！</h1>
-                <h2>歡迎來到伺服器，我是 <span class="highlight">{hostname}</span> 號機</h2>
-                <p>這支 Python 微型服務由 Jenkins 進行 Build (建置打包)，並由 Ansible 全自動派送上線！</p>
-                <p>零外部依賴、秒級啟動，是極輕量化部署的最佳示範方案！</p>
+                <h1>🚀 CI/CD 自動化部署成功！</h1>
+                <h2>目前回應的伺服器是 <span class="highlight">{hostname}</span></h2>
+                <p>容器內部監聽 Port：<span class="highlight">{port}</span></p>
+                <p>這支 Python 微型服務由 Jenkins 進行建置打包，並由 Ansible 全自動派送上線。</p>
             </body>
         </html>
         """
@@ -33,5 +34,5 @@ class SimpleHandler(BaseHTTPRequestHandler):
 
 if __name__ == '__main__':
     server = HTTPServer(('0.0.0.0', port), SimpleHandler)
-    print(f"極輕量 Python Server 已在 Port {port} 啟動...")
+    print(f"Python Web Server 已在 Port {port} 啟動，等待連線中...")
     server.serve_forever()

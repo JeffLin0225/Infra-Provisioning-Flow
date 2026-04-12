@@ -1,21 +1,25 @@
 pipeline {
     agent any
 
+    // Jenkins 參數面板：使用者在網頁上可以選擇或輸入以下設定值
     parameters {
-        choice(name: 'ACTION', choices: ['apply', 'destroy'], description: '請選擇要「建立 (apply)」還是「銷毀 (destroy)」機器？')
-        string(name: 'VM_COUNT', defaultValue: '3', description: '想要建立幾台目標 VM (容器)？')
-        string(name: 'START_PORT', defaultValue: '2222', description: 'SSH 預設起始 Port 號？')
-        string(name: 'WEB_PORT_START', defaultValue: '8081', description: 'HTTP Web 服務起始 Port 號？')
-        choice(name: 'DEPLOY_TARGET', choices: ['web_servers', 'all', 'others', 'none'], description: 'Ansible 該部署到哪些目標？ (none = 單純開機，略過部署)')
+        choice(name: 'ACTION', choices: ['apply', 'destroy'], description: '選擇要「建立 (apply)」還是「銷毀 (destroy)」機器')
+        string(name: 'VM_COUNT', defaultValue: '3', description: '建立幾台目標 VM (容器)')
+        string(name: 'START_PORT', defaultValue: '2222', description: 'SSH 對外映射起始 Port')
+        string(name: 'WEB_PORT_START', defaultValue: '8081', description: 'HTTP Web 服務起始 Port')
+        choice(name: 'DEPLOY_TARGET', choices: ['web_servers', 'all', 'others', 'none'], description: 'Ansible 部署目標群組 (none = 跳過部署)')
     }
 
     stages {
+
+        // 階段 1：從 Git 取得最新程式碼 (由 SCM 設定自動處理)
         stage('Checkout Code') {
             steps {
                 echo '程式碼已從 Git/SCM 取得完成！'
             }
         }
 
+        // 階段 2：初始化 Terraform 工作環境 (下載 Provider 等)
         stage('Terraform Init') {
             steps {
                 dir('terraform-lab') {
@@ -24,6 +28,8 @@ pipeline {
             }
         }
 
+        // 階段 3：執行 Terraform 建置或銷毀
+        // apply 時會同步產生 dynamic_hosts.ini 供 Ansible 使用
         stage('Terraform Execute') {
             steps {
                 dir('terraform-lab') {
@@ -43,6 +49,8 @@ pipeline {
             }
         }
 
+        // 階段 4：建置應用程式 (語法檢查 + 打包成 zip)
+        // 只在 apply 且需要部署時才執行
         stage('Build Application') {
             when {
                 expression { params.ACTION == 'apply' && params.DEPLOY_TARGET != 'none' }
@@ -55,6 +63,8 @@ pipeline {
             }
         }
 
+        // 階段 5：透過 Ansible 自動部署到目標容器
+        // 需要先啟動 Conda 環境才能使用 ansible-playbook 指令
         stage('Ansible Deploy') {
             when {
                 expression { params.ACTION == 'apply' && params.DEPLOY_TARGET != 'none' }
@@ -66,15 +76,15 @@ pipeline {
                     sh """
                     #!/bin/bash
                     
-                    # 1. 啟動 conda 環境
+                    # 啟動 Conda 環境 (Ansible 安裝在此環境中)
                     eval "\$(conda shell.bash hook)"
                     conda activate codedev
                     
-                    # 2. 顯示環境資訊
+                    # 顯示環境資訊供 Debug 確認
                     which python
                     ansible --version
                     
-                    # 3. 執行 Ansible 部署
+                    # 執行 Ansible 部署，使用 Terraform 動態產生的主機清單
                     ansible-playbook -i dynamic_hosts.ini demo_setup.yml --limit "${params.DEPLOY_TARGET}"
                     """
                 }

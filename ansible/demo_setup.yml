@@ -1,10 +1,11 @@
 ---
-- name: 極速極輕量 Python 微服務部署
+- name: 極輕量 Python 微服務自動化部署
   hosts: all
-  become: yes
+  become: yes  # 以 root 權限執行所有任務
 
   tasks:
-    - name: 確保基礎環境存在 (Python3 與解壓縮軟體)
+    # 階段 1：安裝基礎套件 (冪等性：已存在的套件會自動跳過)
+    - name: 確保基礎環境存在 (Python3 與解壓縮工具)
       apt:
         name: 
           - python3
@@ -12,18 +13,22 @@
         state: present
         update_cache: yes
 
+    # 階段 2：建立應用程式的專屬資料夾
     - name: 建立應用程式存放資料夾
       file:
         path: /opt/auto-infra-app
         state: directory
         mode: '0755'
 
-    - name: 部署並解壓縮 Build 出來的 Artifact
+    # 階段 3：把 Jenkins 建置階段產出的 app.zip 傳送到容器內並解壓縮
+    - name: 部署並解壓縮 Build 產出的 Artifact (app.zip)
       unarchive:
         src: "{{ playbook_dir }}/../app-src/app.zip"
         dest: /opt/auto-infra-app/
         remote_src: no
 
+    # 階段 4：如果之前已經有部署過，先透過 PID 檔案精準停止舊服務
+    # 不使用 pkill 是因為會誤殺 Ansible 自己的 Python 連線
     - name: 停止舊的 Python 服務 (如果有在跑)
       shell: |
         if [ -f /opt/auto-infra-app/app.pid ]; then
@@ -31,13 +36,16 @@
           rm -f /opt/auto-infra-app/app.pid
         fi
 
-    - name: 在背景啟動 Python 服務
+    # 階段 5：使用 nohup 在背景啟動 Python Web Server
+    # 不使用 Systemd 是因為 Docker 容器的 PID 1 不是 systemd
+    - name: 在背景啟動 Python 服務 (Port 8080)
       shell: |
         nohup python3 /opt/auto-infra-app/app.py > /opt/auto-infra-app/app.log 2>&1 &
         sleep 1
         echo "啟動成功! PID = $(pgrep -f 'python3 /opt/auto-infra-app/app.py')"
 
-    - name: 驗收服務成功啟動 (等待 Port 8080 回應)
+    # 階段 6：實際發出 HTTP 請求驗收，確認服務真的有在回應
+    - name: 驗收服務啟動成功 (等待 Port 8080 回應)
       shell: |
         for i in $(seq 1 15); do
           if python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080')" 2>/dev/null; then
