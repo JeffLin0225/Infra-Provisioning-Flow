@@ -103,31 +103,25 @@ sequenceDiagram
     Dev->>Git: 1. 提交程式碼 (Push)
     Git->>Jenkins: 2. SCM 拉取最新 Jenkinsfile
     
-    rect rgb(235, 212, 245)
-        Note over Jenkins,Docker: Phase 1 — 基礎設施建置
-        Jenkins->>TF: 3. terraform init + apply
-        TF->>Docker: 建立 N 台 Ubuntu 容器
-        TF->>TF: SSH 探針驗收 (nc + grep SSH Banner)
-        TF->>TF: 產生 dynamic_hosts.ini
-        TF-->>Jenkins: 基礎設施就緒
-    end
+    Note over Jenkins,Docker: Phase 1 — 基礎設施建置
+    Jenkins->>TF: 3. terraform init + apply
+    TF->>Docker: 建立 N 台 Ubuntu 容器
+    TF->>TF: SSH 探針驗收 (nc + grep SSH Banner)
+    TF->>TF: 產生 dynamic_hosts.ini
+    TF-->>Jenkins: 基礎設施就緒
     
-    rect rgb(214, 234, 248)
-        Note over Jenkins,Build: Phase 2 — 應用程式建置
-        Jenkins->>Build: 4. 執行 build.sh
-        Build->>Build: Python 語法檢查 (py_compile)
-        Build->>Build: 打包為 app.zip
-        Build-->>Jenkins: 建置成功
-    end
+    Note over Jenkins,Build: Phase 2 — 應用程式建置
+    Jenkins->>Build: 4. 執行 build.sh
+    Build->>Build: Python 語法檢查 (py_compile)
+    Build->>Build: 打包為 app.zip
+    Build-->>Jenkins: 建置成功
     
-    rect rgb(212, 239, 223)
-        Note over Jenkins,VMs: Phase 3 — 自動化部署
-        Jenkins->>Ansible: 5. conda activate + ansible-playbook
-        Ansible->>VMs: SSH 連入 + 解壓縮 app.zip
-        Ansible->>VMs: nohup 背景啟動 Python Web Server
-        Ansible->>VMs: 驗收 Port 8080 HTTP 回應
-        Ansible-->>Jenkins: 部署完成
-    end
+    Note over Jenkins,VMs: Phase 3 — 自動化部署
+    Jenkins->>Ansible: 5. conda activate + ansible-playbook
+    Ansible->>VMs: SSH 連入 + 解壓縮 app.zip
+    Ansible->>VMs: nohup 背景啟動 Python Web Server
+    Ansible->>VMs: 驗收 Port 8080 HTTP 回應
+    Ansible-->>Jenkins: 部署完成
 
     Jenkins->>Dev: 6. 管線執行完畢 (成功/失敗)
 ```
