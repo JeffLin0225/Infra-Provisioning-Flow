@@ -90,6 +90,70 @@ flowchart TB
 
 ---
 
+## 一鍵自動化執行流程 (Pipeline Sequence Flow)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Dev as 開發/維運人員<br>(DevOps)
+    participant Git as GitHub SCM<br>(程式碼與 Jenkinsfile)
+    participant Jenkins as Jenkins Controller<br>(Pipeline as Code)
+    participant TF as Terraform<br>(IaC Engine)
+    participant Docker as Docker / Orbstack<br>(容器守護程序)
+    participant Build as Build Script<br>(build.sh)
+    participant Ansible as Ansible Engine<br>(Conda: codedev)
+    participant VMs as 目標容器叢集<br>(Ubuntu 22.04)
+
+    %% 觸發階段
+    Dev->>Git: 1. 提交程式碼 (Push 至 main/dev 分支)
+    Dev->>Jenkins: 2. 觸發 Build with Parameters (ACTION=apply, VM_COUNT=3)
+    Jenkins->>Git: 3. Checkout SCM 拉取最新流水線與應用代碼
+
+    %% Phase 1: IaC 撥補
+    rect rgb(245, 240, 255)
+        Note over Jenkins,Docker: Phase 1 — 基礎架構動態撥補 (IaC Provisioning)
+        Jenkins->>TF: 4. 執行 terraform init & apply (注入參數)
+        TF->>Docker: 5. 呼叫 Docker API 建立 N 台 Ubuntu 容器叢集
+        Docker-->>TF: 容器實例開通完成 (Entrypoint 啟動 OpenSSH)
+        loop SSH 連線探針驗收 (最多 60 次輪詢 / 180s 超時)
+            TF->>Docker: nc -w 5 localhost {port} 探測 SSH Banner
+            Docker-->>TF: 回應 "SSH-2.0-OpenSSH..." (驗收成功)
+        end
+        TF->>TF: 6. 模板化動態渲染資產清冊 (dynamic_hosts.ini)
+        TF-->>Jenkins: 基礎設施就緒，交接動態主機清單
+    end
+
+    %% Phase 2: 應用建置
+    rect rgb(255, 248, 235)
+        Note over Jenkins,Build: Phase 2 — 靜態檢查與工件打包 (Application Build)
+        Jenkins->>Build: 7. 呼叫 app-src/build.sh
+        Build->>Build: 8. Python 語法靜態檢查 (py_compile app.py)
+        Build->>Build: 9. 輕量封裝部署工件 (zipfile 產出 app.zip)
+        Build-->>Jenkins: 建置檢驗通過，工件交付流水線
+    end
+
+    %% Phase 3: Ansible 部署
+    rect rgb(235, 248, 245)
+        Note over Jenkins,VMs: Phase 3 — 組態部署與微服務守護 (Ansible Deployment)
+        Jenkins->>Ansible: 10. 載入 Conda codedev 環境，執行 demo_setup.yml
+        Ansible->>VMs: 11. 平行 SSH 穿透連線 (StrictHostKeyChecking=no)
+        Ansible->>VMs: 12. 確保環境相依 (apt 安裝 python3, unzip，具冪等性)
+        Ansible->>VMs: 13. 解壓縮 app.zip 至 /opt/auto-infra-app/
+        Ansible->>VMs: 14. 讀取 app.pid 安全終止舊進程 (防誤殺 Ansible 連線)
+        Ansible->>VMs: 15. nohup 背景守護啟動 app.py (監聽容器內 Port 8080)
+        loop HTTP 8080 連線探針驗收 (最多 15 次輪詢 / 15s)
+            Ansible->>VMs: 本地端點探針驗收 (urllib.request -> 127.0.0.1:8080)
+            VMs-->>Ansible: 回傳 HTTP 200 OK (服務上線)
+        end
+        Ansible-->>Jenkins: 部署完畢，節點狀態健康
+    end
+
+    %% 交付完成
+    Jenkins-->>Dev: 16. Pipeline SUCCESS (開放瀏覽器存取 http://localhost:8081+)
+```
+
+---
+
 ## 專案結構
 
 ```text
