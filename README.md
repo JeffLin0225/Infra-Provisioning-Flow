@@ -1,177 +1,223 @@
 # 基礎建設自動化與 CI/CD 部署流程 (Infrastructure as Code & CI/CD Pipeline)
 
-本專案展示了一個基於 **Jenkins**, **Terraform** 與 **Ansible** 的完整本機 CI/CD 自動化方案。
-透過 Jenkins Pipeline 一鍵觸發，即可完成「建置機器 → 打包程式碼 → 自動部署上線」的全流程，所有環節皆以程式碼驅動 (Infrastructure as Code)。
+本專案實作了一套基於 **Jenkins**、**Terraform** 與 **Ansible** 的企業級端到端基礎設施自動化與應用交付流程。藉由 **Pipeline as Code** 設計，透過 Jenkins 參數化單鍵觸發，自動貫穿「虛擬容器叢集撥補（IaC）→ 埠位探針就緒驗收 → 動態資產清冊生成 → 程式碼靜態語法檢驗與封裝 → Ansible 平行派送與行程守護 → HTTP 服務健康驗收」的全自動化流水線，達成基礎架構與應用交付的百分之百程式碼化。
 
-## 模組總覽
+---
 
-本專案設計為由 Jenkins 統一調度，但每個模組也可獨立運作。建議依照以下順序閱讀與操作：
+## 系統架構
 
-| 順序 | 資料夾 | 使用的工具 | 該做什麼 | 對應文件 |
-|------|--------|-----------|---------|----------|
-| ① | `jenkins-lab/` | Jenkins (WAR 獨立執行，零污染) | **首次使用**：下載 `jenkins.war` 並啟動 CI/CD 控制中心 | 閱讀 `INSTALL.md` |
-| ② | `terraform-lab/` | Terraform (Docker Provider) | **理解基礎設施**：了解如何用程式碼定義容器叢集與 SSH 探針驗收 | 閱讀 `README.md` |
-| ③ | `app-src/` | Python 3 (標準函式庫 HTTP Server) | **理解應用程式**：了解零外部依賴的 Web Server 及建置打包流程 | 直接閱讀 `app.py` 與 `build.sh` |
-| ④ | `ansible/` | Ansible (Conda `codedev` 環境) | **理解部署流程**：了解如何自動把程式碼派送到容器上 | 閱讀 `README.md` |
-| ⑤ | Jenkins 網頁 | — | **一鍵執行**：在 Jenkins 建立 Pipeline 專案並觸發 Build | 參考下方「快速開始」 |
+```mermaid
+flowchart TB
+    %% 節點樣式定義
+    classDef client fill:#e8f4fd,stroke:#2b7bb9,stroke-width:2px,color:#1e3d59;
+    classDef pipeline fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#bf360c;
+    classDef iac fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,color:#4a148c;
+    classDef runtime fill:#e8f8f5,stroke:#117864,stroke-width:2px,color:#0e6251;
+    classDef config fill:#eaf2f8,stroke:#2471a3,stroke-width:2px,color:#154360;
+    classDef teardown fill:#fdedec,stroke:#c0392b,stroke-width:2px,color:#922b21;
 
-> 容器環境使用 **Docker / Orbstack** 運行 **Ubuntu 22.04** 來模擬目標伺服器。
-> 如果只是想快速跑一遍看效果，可以直接跳到「快速開始」章節。
+    %% 01. 觸發與控制層
+    subgraph Layer1 ["01. 版本控制與觸發層 (SCM & Developer Interface)"]
+        Dev["開發與維運人員<br>(Developer / DevOps)"]
+        GitRepo["GitHub Repository<br>JeffLin0225/Infra-Provisioning-Flow"]
+    end
 
-## 專案資料夾結構＆閱讀順序
+    %% 02. CI/CD 調度中樞
+    subgraph Layer2 ["02. CI/CD 管線調度層 (Pipeline Controller)"]
+        Jenkins["Jenkins Pipeline Controller<br>Port: 8080 | Standalone WAR<br>(Zero-Pollution Isolated Data)"]
+        Param["管線參數面板 (Build with Parameters)<br>ACTION: apply / destroy<br>VM_COUNT: 3 | START_PORT: 2222<br>WEB_PORT_START: 8081 | DEPLOY_TARGET: web_servers"]
+    end
+
+    %% 03. 基礎設施撥補層 (IaC)
+    subgraph Layer3 ["03. 基礎設施即程式碼撥補層 (IaC Engine)"]
+        TF["Terraform 核心引擎<br>(kreuzwerker/docker ~> 3.0.1)"]
+        SSHProbe["SSH 連線探針 (local-exec)<br>nc -w 5 | grep SSH<br>Max Timeout: 180s (60 次輪詢)"]
+        DynInv["動態清冊渲染 (local_file)<br>ansible/dynamic_hosts.ini<br>前 2 台: web_servers | 餘數: others"]
+    end
+
+    %% 04. 執行階段容器環境
+    subgraph Layer4 ["04. 虛擬目標容器叢集 (Target Environment - Orbstack / Docker)"]
+        DockerD[("Docker Daemon<br>Unix Socket API")]
+        VM1["ansible-target-1 (Ubuntu 22.04)<br>SSH: 2222 -> 22 | HTTP: 8081 -> 8080<br>Group: [web_servers]"]
+        VM2["ansible-target-2 (Ubuntu 22.04)<br>SSH: 2223 -> 22 | HTTP: 8082 -> 8080<br>Group: [web_servers]"]
+        VM3["ansible-target-3 (Ubuntu 22.04)<br>SSH: 2224 -> 22 | HTTP: 8083 -> 8080<br>Group: [others]"]
+    end
+
+    %% 05. 應用建置與發布層
+    subgraph Layer5 ["05. 應用打包與組態交付層 (Build & Configuration)"]
+        BuildEngine["應用建置引擎 (build.sh)<br>1. py_compile 語法檢驗<br>2. zipfile 封裝產出 app.zip"]
+        AnsibleEngine["Ansible 組態引擎 (Conda: codedev)<br>Playbook: demo_setup.yml<br>SSH 認證 (StrictHostKeyChecking=no)"]
+        DeployOps["目標容器內生命週期管理<br>1. apt 安裝 python3, unzip<br>2. 依 app.pid 精準中止舊服務<br>3. nohup 背景啟動 app.py<br>4. 15s 內部 HTTP 8080 探針驗收"]
+    end
+
+    %% 06. 銷毀與治理流程
+    subgraph Layer6 ["06. 資源回收與治理通道 (Teardown & Cleanup)"]
+        DestroyAction["銷毀請求 (ACTION=destroy)"]
+        TFDestroy["Terraform Destroy<br>自動化反撥補釋放所有容器與連接埠"]
+    end
+
+    %% 主鏈路步驟 (1. ~ 10.)
+    Dev -->|"1. Git Push / 觸發管線"| GitRepo
+    GitRepo -->|"2. SCM 拉取 Jenkinsfile"| Jenkins
+    Jenkins -->|"3. 讀取調度參數"| Param
+    Param -->|"4. 啟動基礎架構撥補"| TF
+    TF -->|"5. 呼叫 Docker API 啟動 N 台容器"| DockerD
+    DockerD --> VM1
+    DockerD --> VM2
+    DockerD --> VM3
+    DockerD -->|"6. 驗證容器 OpenSSH 守護行程"| SSHProbe
+    SSHProbe -->|"7. 驗收完成，渲染資產清冊"| DynInv
+    Jenkins -->|"8. 觸發應用程式碼打包"| BuildEngine
+    BuildEngine -->|"9. 移交 Artifact (app.zip)"| AnsibleEngine
+    DynInv -.->|"注入動態節點清冊"| AnsibleEngine
+    AnsibleEngine -->|"10. 平行 SSH 部署與守護"| DeployOps
+    DeployOps -.->|"派送代碼並驗證上線"| VM1
+    DeployOps -.->|"派送代碼並驗證上線"| VM2
+
+    %% 銷毀治理鏈路步驟 (A. ~ C.)
+    Param -.->|"A. 觸發銷毀流程"| DestroyAction
+    DestroyAction -->|"B. 執行反撥補"| TFDestroy
+    TFDestroy -->|"C. 一鍵釋放容器與關閉連接埠"| DockerD
+
+    %% 套用樣式類別
+    class Dev,GitRepo client;
+    class Jenkins,Param pipeline;
+    class TF,SSHProbe,DynInv iac;
+    class DockerD,VM1,VM2,VM3 runtime;
+    class BuildEngine,AnsibleEngine,DeployOps config;
+    class DestroyAction,TFDestroy teardown;
+```
+
+---
+
+## 專案結構
 
 ```text
-auto-infra-build/
-├── README.md                    # 專案總覽文件 (本文件)
-├── .gitignore                   # Git 忽略規則 (含 tfstate、jenkins_data 等)
+.
+├── .gitignore                   # Git 排除清單 (包含 tfstate、動態主機清單、jenkins.war 等)
+├── README.md                    # 專案架構說明與維運手冊 (本文件)
 │
-├── jenkins-lab/                 # ① 最先閱讀：CI/CD 控制中心
-│   ├── INSTALL.md               # Jenkins 零污染安裝教學 (首次使用請先看這份)
-│   ├── README.md                # Jenkins 管線架構說明
-│   ├── Jenkinsfile              # Pipeline as Code (一鍵觸發所有階段)
-│   ├── jenkins.war              # Jenkins 主程式 (需自行下載，已被 .gitignore 忽略)
-│   └── jenkins_data/            # Jenkins 執行資料 (自動產生，已被 .gitignore 忽略)
+├── jenkins-lab/                 # 【① CI/CD 調度中樞】
+│   ├── INSTALL.md               # Jenkins 本機綠色版 (WAR) 零污染安裝與初始化指南
+│   ├── README.md                # Jenkins 模組管線架構與運作邏輯解析
+│   ├── Jenkinsfile              # 宣告式流水線腳本 (涵蓋環境檢查、IaC、打包、部署全階段)
+│   ├── jenkins.war              # Jenkins 核心可執行檔 (首次執行請依文件手動下載)
+│   └── jenkins_data/            # Jenkins 本機執行目錄 (含插件與 Job 狀態，自動生成)
 │
-├── terraform-lab/               # ② 第二閱讀：基礎設施定義
-│   ├── main.tf                  # 容器叢集定義 + SSH 探針驗收 + 動態 Inventory 產生
-│   ├── main.bak                 # 早期版本備份 (參考用)
-│   └── README.md                # Terraform 模組說明
+├── terraform-lab/               # 【② 基礎設施撥補模組】
+│   ├── main.tf                  # HCL 基礎設施定義：容器叢集、SSH 探針驗收、動態清冊渲染
+│   ├── main.bak                 # 早期基礎架構設計歷史備份檔
+│   └── README.md                # Terraform 模組使用說明與變數設定文件
 │
-├── app-src/                     # ③ 第三閱讀：應用程式原始碼
-│   ├── app.py                   # 極輕量 Python Web Server (零外部依賴)
-│   └── build.sh                 # 建置腳本 (語法檢查 + 打包為 app.zip)
+├── app-src/                     # 【③ 輕量 Web 應用原始碼】
+│   ├── app.py                   # 原生 Python 3 極輕量 HTTP 伺服器 (包含主機名動態辨識，零依賴)
+│   └── build.sh                 # 應用打包腳本 (py_compile 語法檢驗 + 封裝為 app.zip)
 │
-└── ansible/                     # ④ 最後閱讀：自動化部署
-    ├── demo_setup.yml           # 正式部署腳本 (解壓縮 + 背景啟動 + HTTP 驗收)
-    ├── demo_hosts.ini           # 靜態主機清單 (早期範例，已被 dynamic_hosts.ini 取代)
-    ├── local_setup.yml          # 早期練習用部署腳本 (參考用)
-    ├── index.html               # 早期練習用靜態網頁 (參考用)
-    └── README.md                # Ansible 模組說明
+└── ansible/                     # 【④ 組態管理與自動發布模組】
+    ├── demo_setup.yml           # 核心部署 Playbook：環境初始化、解壓、進程清理、背景啟動與探針檢驗
+    ├── dynamic_hosts.ini        # 由 Terraform 動態產出之主機清冊 (依 Port 與群組配置)
+    ├── demo_hosts.ini           # 靜態主機清單範本 (歷史驗證參考)
+    ├── local_setup.yml          # 本機環境部署演練腳本 (參考用)
+    ├── index.html               # 靜態首頁範本 (早期測試用)
+    └── README.md                # Ansible Playbook 任務流程與分群派送說明
 ```
 
+---
 
-## 系統架構圖
+## 模組總覽與核心職責
 
-```mermaid
-flowchart TD
-    Git["GitHub Repository<br>(程式碼與 Jenkinsfile)"]
-    
-    subgraph macOS ["macOS 本機開發環境"]
-        Dev("開發人員")
-        JenkinsWar["Jenkins (WAR 獨立執行)<br>零污染、隨裝隨刪"]
-        Conda["Conda codedev 環境<br>(Ansible 執行環境)"]
-    end
-    
-    subgraph Orbstack ["Orbstack / Docker 容器層"]
-        DockerAPI[("Docker Daemon<br>底層資源分配")]
-        VM1["VM-1<br>:2222 (SSH) / :8081 (HTTP)"]
-        VM2["VM-2<br>:2223 (SSH) / :8082 (HTTP)"]
-        VM3["VM-3<br>:2224 (SSH) / :8083 (HTTP)"]
-    end
-    
-    Dev -->|"Push 程式碼"| Git
-    Git -->|"SCM 觸發管線"| JenkinsWar
-    
-    JenkinsWar -->|"Phase 1: Terraform Apply<br>建立容器 + SSH 探針驗收"| DockerAPI
-    DockerAPI -->|"開通容器叢集"| VM1
-    DockerAPI --> VM2
-    DockerAPI --> VM3
-    
-    JenkinsWar -->|"Phase 2: Build<br>語法檢查 + 打包 app.zip"| AppSrc["app-src/build.sh"]
-    
-    JenkinsWar -->|"Phase 3: Ansible Deploy<br>透過 Conda 環境執行"| Conda
-    Conda -->|"SSH 連入部署 Python 服務"| VM1
-    Conda --> VM2
+本專案採用關注點分離 (Separation of Concerns) 架構，模組可由 Jenkins 集中調度，亦支援工程師手動獨立執行與驗證：
 
-    classDef jenk fill:#fadbd8,stroke:#943126,stroke-width:2px,color:#000;
-    class JenkinsWar jenk;
-```
+| 順序 | 模組目錄 | 核心技術 | 職責與架構亮點 | 參考文件 |
+|:---:|:---|:---|:---|:---|
+| ① | `jenkins-lab/` | **Jenkins 2.x** (Pipeline as Code) | **CI/CD 控制中樞**：集中調度各階段任務，透過參數面板控制拓撲規格與發布策略。 | [`INSTALL.md`](file:///Users/jeff/Desktop/change/Infra-Provisioning-Flow/jenkins-lab/INSTALL.md)<br>[`README.md`](file:///Users/jeff/Desktop/change/Infra-Provisioning-Flow/jenkins-lab/README.md) |
+| ② | `terraform-lab/` | **Terraform** (Docker Provider) | **IaC 資源撥補**：動態開通多節點 Ubuntu 容器，結合本機 `nc` 探針防範假開機，自動模板化輸出 Inventory。 | [`README.md`](file:///Users/jeff/Desktop/change/Infra-Provisioning-Flow/terraform-lab/README.md) |
+| ③ | `app-src/` | **Python 3** (標準函式庫) | **應用建置**：零外部相依微服務，內建 `py_compile` 語法靜態檢查與輕量 ZIP 建置封裝。 | [`build.sh`](file:///Users/jeff/Desktop/change/Infra-Provisioning-Flow/app-src/build.sh) |
+| ④ | `ansible/` | **Ansible** (Conda 虛擬環境) | **組態交付**：自動化套件佈署、精準 PID 舊行程汰換、`nohup` 背景生命週期託管與 HTTP 連線驗收。 | [`README.md`](file:///Users/jeff/Desktop/change/Infra-Provisioning-Flow/ansible/README.md) |
 
-## 一鍵自動化流程 (Pipeline Architecture)
+---
 
-```mermaid
-sequenceDiagram
-    participant Dev as 開發人員
-    participant Git as GitHub
-    participant Jenkins as Jenkins Pipeline
-    participant TF as Terraform
-    participant Docker as Docker Daemon
-    participant Build as build.sh
-    participant Ansible as Ansible (Conda)
-    participant VMs as VM 容器叢集
+## 事前準備
 
-    Dev->>Git: 1. 提交程式碼 (Push)
-    Git->>Jenkins: 2. SCM 拉取最新 Jenkinsfile
-    
-    Note over Jenkins,Docker: Phase 1 — 基礎設施建置
-    Jenkins->>TF: 3. terraform init + apply
-    TF->>Docker: 建立 N 台 Ubuntu 容器
-    TF->>TF: SSH 探針驗收 (nc + grep SSH Banner)
-    TF->>TF: 產生 dynamic_hosts.ini
-    TF-->>Jenkins: 基礎設施就緒
-    
-    Note over Jenkins,Build: Phase 2 — 應用程式建置
-    Jenkins->>Build: 4. 執行 build.sh
-    Build->>Build: Python 語法檢查 (py_compile)
-    Build->>Build: 打包為 app.zip
-    Build-->>Jenkins: 建置成功
-    
-    Note over Jenkins,VMs: Phase 3 — 自動化部署
-    Jenkins->>Ansible: 5. conda activate + ansible-playbook
-    Ansible->>VMs: SSH 連入 + 解壓縮 app.zip
-    Ansible->>VMs: nohup 背景啟動 Python Web Server
-    Ansible->>VMs: 驗收 Port 8080 HTTP 回應
-    Ansible-->>Jenkins: 部署完成
+### 1. 運行環境與相依工具
+- **作業系統**：macOS (Apple Silicon 或 Intel 架構均可)。
+- **容器引擎**：Docker Desktop 或 OrbStack (確認 `docker ps` 可正常運作)。
+- **Java 環境**：Java 17 或 Java 21 (用於驅動本機獨立 Jenkins WAR)。
+- **Terraform**：v1.5.0+。
+- **Python / Conda**：安裝 Conda 並建立具備 Ansible 的環境：
+  ```bash
+  conda create -n codedev python=3.10 -y
+  conda activate codedev
+  pip install ansible
+  ```
 
-    Jenkins->>Dev: 6. 管線執行完畢 (成功/失敗)
-```
+---
 
 ## 快速開始
 
-### 前置條件
-- macOS 環境，已安裝 Java 17+ 與 Docker (或 Orbstack)
-- Conda 環境 `codedev` 已安裝 Ansible (`conda activate codedev && ansible --version`)
-- 本專案已 Push 至 GitHub (範例：`https://github.com/JeffLin0225/Infra-Provisioning-Flow`)
-
-### Step 1：啟動 Jenkins
+### Step 1：啟動本機 Jenkins 控制台
 ```bash
 cd jenkins-lab
-# 首次使用需先下載 jenkins.war (詳見 INSTALL.md)
-JENKINS_HOME=./jenkins_data java -jar jenkins.war
+# 首次使用需手動下載 jenkins.war (詳見 INSTALL.md)
+JENKINS_HOME=./jenkins_data java -jar jenkins.war --httpPort=8080
 ```
-啟動後開啟瀏覽器前往 `http://localhost:8080`，完成初始化設定 (詳見 `jenkins-lab/INSTALL.md`)。
+瀏覽器訪問 `http://localhost:8080` 完成管理員帳號初始化。
 
-### Step 2：在 Jenkins 建立 Pipeline 專案
-1. 點選「新增作業 (New Item)」→ 輸入名稱 (例如 `Auto-Pipeline`) → 選擇 **Pipeline** 類型
-2. 往下捲到 **Pipeline** 區塊，將 Definition 改為 **Pipeline script from SCM**
-3. 填寫以下 SCM 設定：
+### Step 2：建立 Pipeline 專案
+1. 進入 Jenkins 儀表板 → 點選「新增作業 (New Item)」。
+2. 輸入名稱 (例如 `Infra-Provisioning-Flow`)，選擇 **Pipeline** 類型。
+3. 在設定頁面捲動至 **Pipeline** 區塊：
+   - **Definition**：選擇 `Pipeline script from SCM`。
+   - **SCM**：選擇 `Git`。
+   - **Repository URL**：`https://github.com/JeffLin0225/Infra-Provisioning-Flow.git`。
+   - **Branch Specifier**：`*/main` (或對應的工作分支)。
+   - **Script Path**：`jenkins-lab/Jenkinsfile`。
+4. 點選儲存後，系統將自動解析出參數面板。
 
-| 欄位 | 填入值 |
-|------|--------|
-| SCM | Git |
-| Repository URL | `https://github.com/JeffLin0225/Infra-Provisioning-Flow` |
-| Branch Specifier | `*/dev` (或您的主要分支名稱) |
-| Script Path | `jenkins-lab/Jenkinsfile` |
+### Step 3：參數化一鍵觸發
+點選左側「**Build with Parameters**」，依需求調整參數：
 
-4. 儲存後點選「Build with Parameters」
+| 參數名稱 | 建議值 | 規格說明 |
+|:---|:---:|:---|
+| `ACTION` | `apply` | 選擇 `apply` 進行開機與部署；選擇 `destroy` 進行環境清空 |
+| `VM_COUNT` | `3` | 虛擬目標主機 (容器) 開通總數量 |
+| `START_PORT` | `2222` | SSH 映射本機的起始連接埠 (遞增分配：2222, 2223, 2224...) |
+| `WEB_PORT_START` | `8081` | Web 服務對外暴露之起始連接埠 (遞增分配：8081, 8082, 8083...) |
+| `DEPLOY_TARGET` | `web_servers` | Ansible 部署目標群組：`web_servers` (前2台)、`others` (第3台起)、`all`、`none` (純開機不發布) |
 
-### Step 3：選擇參數並執行
-| 參數 | 建議值 | 說明 |
-|------|--------|------|
-| ACTION | `apply` | 建立容器叢集 |
-| VM_COUNT | `3` | 開 3 台 VM |
-| START_PORT | `2222` | SSH 從 2222 開始 |
-| WEB_PORT_START | `8081` | HTTP 從 8081 開始 |
-| DEPLOY_TARGET | `web_servers` | 只部署前 2 台 |
+按下 **Build**，管線即會自動執行全流程。
 
-按下 **Build** 後等待管線執行完畢。
+---
 
-### Step 4：驗收部署結果
+## 驗收與維運指令
+
+### 1. HTTP 服務端點驗證
+管線執行完畢後，開啟終端機或瀏覽器檢驗部署節點回應：
 ```bash
-# 打開瀏覽器
-open http://localhost:8081    # → VM-1 的 Python 服務
-open http://localhost:8082    # → VM-2 的 Python 服務
+# 驗證節點 1 (web_servers)
+curl -s http://localhost:8081 | grep "CI/CD 自動化部署成功"
+
+# 驗證節點 2 (web_servers)
+curl -s http://localhost:8082 | grep "CI/CD 自動化部署成功"
+
+# 驗證節點 3 (others，未在 web_servers 群組故應無服務監聽)
+curl -I http://localhost:8083
 ```
 
-### 銷毀環境
-回到 Jenkins，選擇 `ACTION = destroy` 再執行一次 Build，即可一鍵清除所有容器。
+### 2. SSH 容器穿透手動除錯
+如需進入容器檢查日誌或行程狀態，可直接透過對外 Port 連入：
+```bash
+# 登入 VM-1 (密碼: root)
+ssh -p 2222 root@localhost -o StrictHostKeyChecking=no
+
+# 於容器內部檢查行程與日誌
+ps aux | grep app.py
+cat /opt/auto-infra-app/app.log
+cat /opt/auto-infra-app/app.pid
+```
+
+### 3. 一鍵銷毀環境 (Teardown)
+當完成驗證或需重設環境時：
+1. 回到 Jenkins 介面點選 **Build with Parameters**。
+2. 將 `ACTION` 改選為 `destroy` 並執行。
+3. 管線將調用 `terraform destroy -auto-approve`，毫秒級釋放所有容器資源與連接埠佔用。
